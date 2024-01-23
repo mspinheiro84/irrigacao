@@ -4,6 +4,8 @@
 /*includes FreeRTOS*/
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
+#include "freertos/timers.h"
 
 /*includes do ESP32*/
 #include "driver/gpio.h"
@@ -15,6 +17,7 @@
 
 /*includes do Projeto*/
 #include "wifi_app.h"
+#include "http_server.h"
 
 /*define*/
 #define LED 2 //LED do kit
@@ -29,6 +32,60 @@
 #define VASO7 34 //Pino da solenoide 7
 #define VASO8 39 //Pino da solenoide 8
 
+static const char *TAG = "IRRIGACAO";
+static bool credencial_wifi = false;
+// static char ssid[] = "SSID";
+// static char pass[] = "PASSWORD";
+static char *ssid;
+static char *pass;
+
+char* extractJson(char *json, char *name)
+{
+    if ((json != NULL) && (name != NULL) && (json[0] == '{')){
+        int pos, tam;
+        char *aux;
+        tam = strlen(json);
+        aux = malloc(sizeof(char)*tam);
+        memcpy(aux, json, tam);
+        tam = strlen(name);
+        while (1){
+            aux = strchr(aux, '\"');
+            if (aux==NULL){
+                ESP_LOGI(TAG, "Não encontrou");
+                return NULL;
+            }
+            aux++;
+            pos = strcspn(aux+1, "\"")+1;
+            if ((pos == tam )&&(!strncmp(aux, name, tam))){
+                aux = aux+tam+3;
+                pos = strcspn(aux, "\"");
+                aux[pos] = '\0';
+                return aux;
+            }
+        }
+    }
+    ESP_LOGI(TAG, "Parametro nulo");
+    return NULL;
+}
+
+void http_server_receive_post(int tam, char *data)
+{
+    // ESP_LOGI(TAG, "=========== RECEIVED DATA MAIN ==========");
+    // ESP_LOGI(TAG, "%.*s", tam, data);
+    // ESP_LOGI(TAG, "====================================");
+    
+    // extraindo SSID
+    ssid = extractJson(data, "ssid");
+
+    // extraindo PASS
+    pass = extractJson(data, "pass");
+  
+    ESP_LOGI(TAG, "=========== SSID e PASS ==========");
+    ESP_LOGI(TAG, "SSID:%s", ssid);
+    ESP_LOGI(TAG, "SSID:%s", pass);
+    credencial_wifi = true;
+}
+
 void app_main(void)
 {
     /*Conexão com WIFI*/
@@ -42,14 +99,16 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     
     wifi_init_softap();
-    vTaskDelay(pdMS_TO_TICKS(5000));
-    wifi_stop();
-    wifi_init_sta("APSamsung", "12345f");
+    start_http_server();
     while (1)
     {
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(500));
+        if (credencial_wifi){
+            ESP_LOGW(TAG, "Recebida as credenciais");
+            wifi_stop();
+            break;
+        }
     
     }
-    
-
+    wifi_init_sta(ssid, pass);
 }
