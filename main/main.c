@@ -20,6 +20,7 @@
 #include "wifi_app.h"
 #include "http_server.h"
 #include "nvs_app.h"
+#include "mqtt_app.h"
 
 /*define*/
 #define BUTTON  13 //Pino do botão
@@ -39,6 +40,24 @@ static const char *TAG = "IRRIGACAO";
 static bool credencial_wifi = false;
 static char *ssid;
 static char *pass;
+
+void mqtt_app_event_connected(void)
+{
+    char topic[33];
+    sprintf(topic, "irrigacao/Aju");
+    mqtt_app_subscribe(topic);
+}
+
+void mqtt_app_event_data(char *publish_string, int tam)
+{
+    ESP_LOGW(TAG, "payload: %.*s", tam, publish_string);
+}
+
+void wifi_app_connected(void)
+{
+    ESP_LOGW(TAG, "Connected .......");
+    mqtt_app_start();
+}
 
 char* extractJson(char *json, char *name)
 {

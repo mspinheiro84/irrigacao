@@ -1,6 +1,6 @@
 menu "Project Configuration"
 
-#Wifi SoftAP Configuration
+# ======== Wifi SoftAP Configuration ========
     config ESP_WIFI_AP_SSID
         string "WiFi SSID"
         default "Irrigacao"
@@ -25,7 +25,7 @@ menu "Project Configuration"
         help
             Max number of the STA connects to AP.
 
-#Wifi Station Configuration
+# ======== Wifi Station Configuration ======== 
     config ESP_WIFI_SSID
         string "WiFi SSID"
         default "myssid"
@@ -96,5 +96,13 @@ menu "Project Configuration"
         default "ESP32Webserver"
         help
             The client's password which used for basic authenticate.    
+
+#  ======== Configuration MQTT ======== 
+    config BROKER_URI
+        string "Broker URL"
+        default "mqtt://mqtt.eclipseprojects.io"
+        help
+            URL of an mqtt broker which this example connects to.
+
 
 endmenu
