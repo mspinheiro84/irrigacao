@@ -22,17 +22,18 @@
 #include "nvs_app.h"
 
 /*define*/
-#define LED 2 //LED do kit
-#define BOMBA 19 //Pino da bomba
-#define BUTTON 21 //Pino do sensor
-#define VASO1 27 //Pino da solenoide 1
-#define VASO2 26 //Pino da solenoide 2
-#define VASO3 25 //Pino da solenoide 3
-#define VASO4 33 //Pino da solenoide 4
-#define VASO5 32 //Pino da solenoide 5
-#define VASO6 35 //Pino da solenoide 6
-#define VASO7 34 //Pino da solenoide 7
-#define VASO8 39 //Pino da solenoide 8
+#define BUTTON  13 //Pino do botão
+#define SENSOR  21 //Pino do sensor
+#define LED     2  //LED do kit
+#define BOMBA   19 //Pino da bomba
+#define VASO1   27 //Pino da solenoide 1
+#define VASO2   26 //Pino da solenoide 2
+#define VASO3   25 //Pino da solenoide 3
+#define VASO4   33 //Pino da solenoide 4
+#define VASO5   32 //Pino da solenoide 5
+#define VASO6   35 //Pino da solenoide 6
+#define VASO7   34 //Pino da solenoide 7
+#define VASO8   39 //Pino da solenoide 8
 
 static const char *TAG = "IRRIGACAO";
 static bool credencial_wifi = false;
@@ -86,6 +87,63 @@ void http_server_receive_post(int tam, char *data)
     credencial_wifi = true;
 }
 
+static void initialise_gpio(void)
+{
+    gpio_config_t io_conf = {0};
+    
+    //GPIO INPUT
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.pin_bit_mask = BIT64(BUTTON);
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_up_en = 1;
+    io_conf.pull_down_en = 0;
+    gpio_config(&io_conf);
+
+    io_conf.pin_bit_mask = BIT64(SENSOR);
+    gpio_config(&io_conf);
+
+    //GPIO OUTPUT
+    io_conf.pin_bit_mask = BIT64(LED);
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pull_up_en = 0;
+    gpio_config(&io_conf);
+
+    io_conf.pin_bit_mask = BIT64(BOMBA);
+    gpio_config(&io_conf);
+
+    io_conf.pin_bit_mask = BIT64(VASO1);
+    gpio_config(&io_conf);
+
+    io_conf.pin_bit_mask = BIT64(VASO2);
+    gpio_config(&io_conf);
+
+    io_conf.pin_bit_mask = BIT64(VASO3);
+    gpio_config(&io_conf);
+
+    io_conf.pin_bit_mask = BIT64(VASO4);
+    gpio_config(&io_conf);
+
+    io_conf.pin_bit_mask = BIT64(VASO5);
+    gpio_config(&io_conf);
+
+    io_conf.pin_bit_mask = BIT64(VASO6);
+    gpio_config(&io_conf);
+
+    io_conf.pin_bit_mask = BIT64(VASO7);
+    gpio_config(&io_conf);
+
+    io_conf.pin_bit_mask = BIT64(VASO8);
+    gpio_config(&io_conf);
+}
+
+bool check_button(void)
+{
+    if (!gpio_get_level(BUTTON)){
+        return true;
+    }
+    return false;
+}
+
 void clear_credencial_wifi(void)
 {
     nvs_app_clear("ssid");
@@ -103,8 +161,12 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    initialise_gpio();
+    if (check_button()) {
+       clear_credencial_wifi(); 
+    }
     
-    // clear_credencial_wifi();
     ssid = malloc(50*sizeof(char));
     pass = malloc(20*sizeof(char));
     if (!nvs_app_get("ssid", ssid, 's') || !nvs_app_get("pass", pass, 's')){
