@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
 /*includes FreeRTOS*/
 #include "freertos/FreeRTOS.h"
@@ -18,6 +19,7 @@
 /*includes do Projeto*/
 #include "wifi_app.h"
 #include "http_server.h"
+#include "nvs_app.h"
 
 /*define*/
 #define LED 2 //LED do kit
@@ -34,8 +36,6 @@
 
 static const char *TAG = "IRRIGACAO";
 static bool credencial_wifi = false;
-// static char ssid[] = "SSID";
-// static char pass[] = "PASSWORD";
 static char *ssid;
 static char *pass;
 
@@ -79,11 +79,17 @@ void http_server_receive_post(int tam, char *data)
 
     // extraindo PASS
     pass = extractJson(data, "pass");
-  
+
     ESP_LOGI(TAG, "=========== SSID e PASS ==========");
     ESP_LOGI(TAG, "SSID:%s", ssid);
     ESP_LOGI(TAG, "SSID:%s", pass);
     credencial_wifi = true;
+}
+
+void clear_credencial_wifi(void)
+{
+    nvs_app_clear("ssid");
+    nvs_app_clear("pass");
 }
 
 void app_main(void)
@@ -98,17 +104,23 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     
-    wifi_init_softap();
-    start_http_server();
-    while (1)
-    {
-        vTaskDelay(pdMS_TO_TICKS(500));
-        if (credencial_wifi){
-            ESP_LOGW(TAG, "Recebida as credenciais");
-            wifi_stop();
-            break;
+    // clear_credencial_wifi();
+    ssid = malloc(50*sizeof(char));
+    pass = malloc(20*sizeof(char));
+    if (!nvs_app_get("ssid", ssid, 's') || !nvs_app_get("pass", pass, 's')){
+        wifi_init_softap();
+        start_http_server();
+
+        while (1){
+            vTaskDelay(pdMS_TO_TICKS(500));
+            if (credencial_wifi){
+                wifi_stop();
+                nvs_app_set("ssid", ssid, 's');
+                nvs_app_set("pass", pass, 's');                
+                break;
+            }
+        
         }
-    
     }
     wifi_init_sta(ssid, pass);
 }
