@@ -26,7 +26,7 @@
 #define BUTTON  13 //Pino do botão
 #define SENSOR  21 //Pino do sensor
 #define LED     2  //LED do kit
-#define BOMBA   19 //Pino da bomba
+#define BOMBA   2 //Pino da bomba 19
 #define VASO1   27 //Pino da solenoide 1
 #define VASO2   26 //Pino da solenoide 2
 #define VASO3   25 //Pino da solenoide 3
@@ -35,29 +35,13 @@
 #define VASO6   35 //Pino da solenoide 6
 #define VASO7   34 //Pino da solenoide 7
 #define VASO8   39 //Pino da solenoide 8
+#define TAG_VASOS   "v" //Tag da chave para os estados dos 8 solenoides
+#define TAG_BOMBA   "b" //Tag da chave para os estados dos 8 solenoides
 
 static const char *TAG = "IRRIGACAO";
 static bool credencial_wifi = false;
 static char *ssid;
 static char *pass;
-
-void mqtt_app_event_connected(void)
-{
-    char topic[33];
-    sprintf(topic, "irrigacao/Aju");
-    mqtt_app_subscribe(topic);
-}
-
-void mqtt_app_event_data(char *publish_string, int tam)
-{
-    ESP_LOGW(TAG, "payload: %.*s", tam, publish_string);
-}
-
-void wifi_app_connected(void)
-{
-    ESP_LOGW(TAG, "Connected .......");
-    mqtt_app_start();
-}
 
 char* extractJson(char *json, char *name)
 {
@@ -86,6 +70,60 @@ char* extractJson(char *json, char *name)
     }
     ESP_LOGI(TAG, "Parametro nulo");
     return NULL;
+}
+
+void mqtt_app_event_connected(void)
+{
+    char topic[33];
+    sprintf(topic, "irrigacao/Aju");
+    mqtt_app_subscribe(topic);
+}
+
+void set_solenoides(char *tag, char *dado)
+{
+    if (!strcmp(tag, TAG_VASOS)){
+        gpio_set_level(VASO1, dado[0] == '1');
+        gpio_set_level(VASO2, dado[1] == '1');
+        gpio_set_level(VASO3, dado[2] == '1');
+        gpio_set_level(VASO4, dado[3] == '1');
+        // gpio_set_level(VASO5, dado[4] == '1');
+        // gpio_set_level(VASO6, dado[5] == '1');
+        // gpio_set_level(VASO7, dado[6] == '1');
+        // gpio_set_level(VASO8, dado[7] == '1');
+        return;
+    }     
+    if(!strcmp(tag, TAG_BOMBA)){
+        gpio_set_level(BOMBA, *dado == '1');
+        return;
+    }
+}
+
+void mqtt_app_event_data(char *publish_string, int tam)
+{
+    ESP_LOGW(TAG, "payload: %.*s", tam, publish_string);
+    publish_string[tam] = '\0';
+    char aux[tam+1];
+    strcpy(aux, publish_string);
+    char *dado;
+    dado = extractJson(aux, TAG_VASOS);
+    if (dado != NULL){
+        // char *teste;
+        // teste = (char *)calloc(8, sizeof(char));
+        // nvs_app_get(TAG_VASOS, teste, 's');
+        // ESP_LOGW(TAG, "Dado salvo:%.*s", 8, teste);
+        nvs_app_set(TAG_VASOS, dado, 's');
+        set_solenoides(TAG_VASOS, dado);
+    }
+    dado = extractJson(aux, TAG_BOMBA);
+    if (dado != NULL){
+        nvs_app_set(TAG_BOMBA, dado, 's');
+        set_solenoides(TAG_BOMBA, dado);
+    }
+}
+
+void wifi_app_connected(void)
+{
+    mqtt_app_start();
 }
 
 void http_server_receive_post(int tam, char *data)

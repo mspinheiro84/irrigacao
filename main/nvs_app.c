@@ -50,7 +50,7 @@ bool nvs_app_get(char *key, void *value, char tipo)
         }
         switch (err) {
             case ESP_OK:
-                if (tipo == 's') ESP_LOGI(TAG, "Done. %s: %s", key, (char *)value);
+                // if (tipo == 's') ESP_LOGI(TAG, "Done. %s: %s", key, (char *)value);
                 // }else{ int temp = * (int*)value; ESP_LOGI(TAG, "Done. %s: %d", key, temp);}
                 // printf("Done\n");
                 // printf("Restart counter = %d\n", restart_counter);
@@ -86,7 +86,7 @@ void nvs_app_set(char *key, void *value, char tipo)
 
         // Write
         if (tipo == 's'){
-            ESP_LOGI(TAG, "Updating %s in NVS %s ... ", key, (char *) value);
+            // ESP_LOGI(TAG, "Updating %s in NVS %s ... ", key, (char *) value);
             // printf("Updating restart counter in NVS ... ");
             err = nvs_set_str(nvsHandle, key, value);
         } else {
