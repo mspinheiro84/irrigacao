@@ -37,8 +37,12 @@
 #define VASO6   35 //Pino da solenoide 6
 #define VASO7   34 //Pino da solenoide 7
 #define VASO8   39 //Pino da solenoide 8
-#define TAG_VASOS   "v" //Tag da chave para os estados dos 8 solenoides
-#define TAG_BOMBA   "b" //Tag da chave para os estados dos 8 solenoides
+#define TAG_VASOS   "a" //Tag da chave para os estados dos 8 solenoides
+#define TAG_BOMBA   "b" //Tag da chave para o estado da bomba
+#define TAG_AGEN_VASOS   "v" //Tag da chave para os estados dos 8 solenoides
+#define TAG_AGEN_HORARIO "h" //Tag do agendamento de horário (h:m)
+#define TAG_AGEN_TEMPO   "t" //Tag do tempo de água aberto em minutos
+#define TEMPO_VERIF      5   //Tempo de vefiricação do horario
 
 static const char *TAG = "IRRIGACAO";
 static bool credencial_wifi = false;
@@ -85,7 +89,7 @@ void mqtt_app_event_connected(void)
 
 void set_solenoides(char *tag, char *dado)
 {
-    if (!strcmp(tag, TAG_VASOS)){
+    if ((!strcmp(tag, TAG_AGEN_VASOS)) || (!strcmp(tag, TAG_VASOS))){
         gpio_set_level(VASO1, dado[0] == '1');
         gpio_set_level(VASO2, dado[1] == '1');
         gpio_set_level(VASO3, dado[2] == '1');
@@ -109,45 +113,99 @@ void mqtt_app_event_data(char *publish_string, int tam)
     char aux[tam+1];
     strcpy(aux, publish_string);
     char *dado;
+    //Comando para ligar os vasos
     dado = extractJson(aux, TAG_VASOS);
     if (dado != NULL){
-        // char *teste;
-        // teste = (char *)calloc(8, sizeof(char));
-        // nvs_app_get(TAG_VASOS, teste, 's');
-        // ESP_LOGW(TAG, "Dado salvo:%.*s", 8, teste);
-        nvs_app_set(TAG_VASOS, dado, 's');
         set_solenoides(TAG_VASOS, dado);
     }
+    //Comando para ligar a bomba
     dado = extractJson(aux, TAG_BOMBA);
     if (dado != NULL){
-        nvs_app_set(TAG_BOMBA, dado, 's');
+        // nvs_app_set(TAG_BOMBA, dado, 's');
         set_solenoides(TAG_BOMBA, dado);
     }
+    //Comando para agendar os vasos
+    dado = extractJson(aux, TAG_AGEN_VASOS);
+    if (dado != NULL){
+        nvs_app_set(TAG_AGEN_VASOS, dado, 's');
+    }
+    //Comando para salvar horario
+    dado = extractJson(aux, TAG_AGEN_HORARIO);
+    if (dado != NULL){
+        nvs_app_set(TAG_AGEN_HORARIO, dado, 's');
+    }
+    //Comando para salvar tempo
+    dado = extractJson(aux, TAG_AGEN_TEMPO);
+    if (dado != NULL){
+        nvs_app_set(TAG_AGEN_TEMPO, dado, 's');
+    }
+
+}
+
+void acionamento_agendado(void){
+    char *dado;
+    dado = malloc(9*sizeof(char));
+    nvs_app_get(TAG_AGEN_VASOS, dado, 's');
+    set_solenoides(TAG_AGEN_VASOS, dado);
+    dado = malloc(3*sizeof(char));
+    nvs_app_get(TAG_AGEN_TEMPO, dado, 's');
+    // ESP_LOGW(TAG, "Liga agua");
+    vTaskDelay(pdMS_TO_TICKS(1000*60*atoi(dado)));
+    set_solenoides(TAG_AGEN_VASOS, "00000000");
 }
 
 void vTaskSntp (void *pvParameters){
     static time_t now;
-    char data[15], hora[9];
+    char aux[3];
+    int minutesNow, minutesScheduling, minutesDif;
+    int delay;
+    char horario[6];
     struct tm timeinfo;
     while (1)
     {
         time(&now);
+        //Set timezone to Brazil Standard Time
+        setenv("TZ", "UTC+3", 1);
+        tzset();
+        localtime_r(&now, &timeinfo);
         // Is time set? If not, tm_year will be (1970 - 1900).
         if (timeinfo.tm_year < (2023 - 1900)) {
             ESP_LOGI(TAG, "Time is not set yet. Connecting to WiFi and getting time over NTP.");
             obtain_time();
             // update 'now' variable with current time
             time(&now);
+        } else {
+            localtime_r(&now, &timeinfo);
+            strftime(aux, sizeof(aux), "%H", &timeinfo);
+            minutesNow = atoi(aux)*60;
+            strftime(aux, sizeof(aux), "%M", &timeinfo);
+            minutesNow += atoi(aux);
+            minutesScheduling = -1;
+
+            // ESP_LOGI(TAG, "Tempo em minutos: %d", minutesNow);
+            
+            if (nvs_app_get(TAG_AGEN_HORARIO, horario, 's')){
+                ESP_LOGW(TAG, "%s", horario);
+                minutesScheduling = atoi(&horario[3]);
+                horario[2] = '\0';
+                minutesScheduling += atoi(horario)*60;
+                // ESP_LOGI(TAG, "Tempo em minutos agendado: %d", minutesScheduling);
+            } else {
+                ESP_LOGI(TAG, "Sem horário salvo");
+            }
+
+            delay = TEMPO_VERIF;
+            if (minutesScheduling > -1){
+                minutesDif = minutesScheduling - minutesNow;
+                // ESP_LOGW(TAG, "Diferença do tempo: %d", minutesDif);
+                if ((minutesDif < 2) && (minutesDif > -2)){
+                    acionamento_agendado();
+                } else if ((minutesDif > 0) && (minutesDif <= TEMPO_VERIF)){
+                    delay = minutesDif;
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(1000*60*delay));
         }
-        //Set timezone to Brazil Standard Time
-        setenv("TZ", "UTC+3", 1);
-        tzset();
-        localtime_r(&now, &timeinfo);        
-        strftime(data, sizeof(data), "%a %d/%m/%Y", &timeinfo);
-        strftime(hora, sizeof(hora), "%X", &timeinfo);
-        printf("\nData: %s\n", data);
-        printf("\nHorário no Brasil: %s\n\n", hora);
-        vTaskDelay(pdMS_TO_TICKS(1000*60));
     }
     
 }
