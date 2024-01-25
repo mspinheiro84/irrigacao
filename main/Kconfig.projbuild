@@ -104,5 +104,11 @@ menu "Project Configuration"
         help
             URL of an mqtt broker which this example connects to.
 
+#  ======== Configuration MQTT ======== 
+    config SNTP_TIME_SERVER
+        string "SNTP server name"
+        default "pool.ntp.org"
+        help
+            Hostname of the main SNTP server.
 
 endmenu

@@ -15,12 +15,14 @@
 #include "nvs_flash.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "esp_sntp.h"
 
 /*includes do Projeto*/
 #include "wifi_app.h"
 #include "http_server.h"
 #include "nvs_app.h"
 #include "mqtt_app.h"
+#include "sntp_app.h"
 
 /*define*/
 #define BUTTON  13 //Pino do botão
@@ -42,6 +44,8 @@ static const char *TAG = "IRRIGACAO";
 static bool credencial_wifi = false;
 static char *ssid;
 static char *pass;
+
+TaskHandle_t xHandleSntp;
 
 char* extractJson(char *json, char *name)
 {
@@ -121,9 +125,37 @@ void mqtt_app_event_data(char *publish_string, int tam)
     }
 }
 
+void vTaskSntp (void *pvParameters){
+    static time_t now;
+    char data[15], hora[9];
+    struct tm timeinfo;
+    while (1)
+    {
+        time(&now);
+        // Is time set? If not, tm_year will be (1970 - 1900).
+        if (timeinfo.tm_year < (2023 - 1900)) {
+            ESP_LOGI(TAG, "Time is not set yet. Connecting to WiFi and getting time over NTP.");
+            obtain_time();
+            // update 'now' variable with current time
+            time(&now);
+        }
+        //Set timezone to Brazil Standard Time
+        setenv("TZ", "UTC+3", 1);
+        tzset();
+        localtime_r(&now, &timeinfo);        
+        strftime(data, sizeof(data), "%a %d/%m/%Y", &timeinfo);
+        strftime(hora, sizeof(hora), "%X", &timeinfo);
+        printf("\nData: %s\n", data);
+        printf("\nHorário no Brasil: %s\n\n", hora);
+        vTaskDelay(pdMS_TO_TICKS(1000*60));
+    }
+    
+}
+
 void wifi_app_connected(void)
 {
     mqtt_app_start();
+    xTaskCreate(vTaskSntp, "SNTP", 2048, NULL, 1, &xHandleSntp);
 }
 
 void http_server_receive_post(int tam, char *data)
