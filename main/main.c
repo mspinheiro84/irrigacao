@@ -43,13 +43,14 @@
 #define TAG_AGEN_VASOS   "v" //Tag da chave para os estados dos 8 solenoides
 #define TAG_AGEN_HORARIO "h" //Tag do agendamento de horário (h:m)
 #define TAG_AGEN_TEMPO   "t" //Tag do tempo de água aberto em minutos
-#define TEMPO_VERIF      5   //Tempo de vefiricação do horario em minutos
+#define TEMPO_VERIF      2   //Tempo de vefiricação do horario em minutos
 
 static const char *TAG = "IRRIGACAO";
 static bool credencial_wifi = false;
 static char *ssid;
 static char *pass;
 static int vazao;
+static bool status_registro;
 static bool status_bomba;
 
 TaskHandle_t xHandleSntp, xHandleSensor, xHandleBomba;
@@ -94,14 +95,7 @@ void mqtt_app_event_connected(void)
 void set_solenoides(char *tag, char *dado)
 {
     if ((!strcmp(tag, TAG_AGEN_VASOS)) || (!strcmp(tag, TAG_VASOS))){
-        if(!strcmp(dado, "00000000")){
-            vTaskSuspend(xHandleSensor);
-            vTaskSuspend(xHandleBomba);
-        } else {
-            vTaskResume(xHandleSensor);
-            vTaskResume(xHandleBomba);
-            vazao = 0;
-        }
+        vazao = 0;
         gpio_set_level(VASO1, dado[0] == '1');
         gpio_set_level(VASO2, dado[1] == '1');
         gpio_set_level(VASO3, dado[2] == '1');
@@ -110,11 +104,22 @@ void set_solenoides(char *tag, char *dado)
         // gpio_set_level(VASO6, dado[5] == '1');
         // gpio_set_level(VASO7, dado[6] == '1');
         // gpio_set_level(VASO8, dado[7] == '1');
+        if(!strcmp(dado, "00000000")){
+            status_registro = pdFALSE;
+            vTaskSuspend(xHandleSensor);
+            vTaskSuspend(xHandleBomba);
+        } else {
+            status_registro = pdTRUE;
+            vTaskResume(xHandleSensor);
+            vTaskResume(xHandleBomba);
+        }
         return;
     }     
     if(!strcmp(tag, TAG_BOMBA)){
-        status_bomba = (*dado == '1');
-        gpio_set_level(BOMBA, status_bomba);
+        if (status_registro){
+            status_bomba = (*dado == '1');
+            gpio_set_level(BOMBA, status_bomba);
+        }
         return;
     }
 }
@@ -141,17 +146,26 @@ void mqtt_app_event_data(char *publish_string, int tam)
     dado = extractJson(aux, TAG_AGEN_VASOS);
     if (dado != NULL){
         nvs_app_set(TAG_AGEN_VASOS, dado, 's');
+        // ESP_LOGW(TAG, "Agendamento vasos:%.*s", 8, dado);
     }
     //Comando para salvar horario
     dado = extractJson(aux, TAG_AGEN_HORARIO);
     if (dado != NULL){
         nvs_app_set(TAG_AGEN_HORARIO, dado, 's');
+        // ESP_LOGW(TAG, "Agendamento horario:%.*s", 6, dado);
     }
     //Comando para salvar tempo
     dado = extractJson(aux, TAG_AGEN_TEMPO);
     if (dado != NULL){
         nvs_app_set(TAG_AGEN_TEMPO, dado, 's');
+        // ESP_LOGW(TAG, "Agendamento tempo:%.*s", 2, dado);
     }
+}
+
+void fechaAgua(void)
+{
+    set_solenoides(TAG_BOMBA, "0");
+    set_solenoides(TAG_VASOS, "00000000");
 }
 
 static void IRAM_ATTR sensor_isr_handler(void* arg)
@@ -164,7 +178,7 @@ void vTaskSensor(void *pvParameters)
     while (1){
         xSemaphoreTake( xHandleSemphSensor, portMAX_DELAY );
         vazao++;
-        ESP_LOGW(TAG, "Botão Apertado, vazão:%d", vazao);
+        ESP_LOGW(TAG, "vazão:%d", vazao);
     }    
 }
 
@@ -181,7 +195,8 @@ void vTaskBomba(void *pvParameters)
         if ((cont > 7) && (!status_bomba)){
             set_solenoides(TAG_BOMBA, "1");
         } else if ((cont > 7) && (status_bomba)){
-            ESP_LOGW(TAG, "Desliga tudo");
+            ESP_LOGW(TAG, "Medida de proteção");
+            fechaAgua();
         }
     }
 }
@@ -195,7 +210,7 @@ void acionamento_agendado(void){
     nvs_app_get(TAG_AGEN_TEMPO, dado, 's');
     // ESP_LOGW(TAG, "Liga agua");
     vTaskDelay(pdMS_TO_TICKS(1000*60*atoi(dado)));
-    set_solenoides(TAG_AGEN_VASOS, "00000000");
+    fechaAgua();
 }
 
 void vTaskSntp (void *pvParameters){
@@ -226,14 +241,14 @@ void vTaskSntp (void *pvParameters){
             minutesNow += atoi(aux);
             minutesScheduling = -1;
 
-            // ESP_LOGI(TAG, "Tempo em minutos: %d", minutesNow);
+            ESP_LOGI(TAG, "Tempo em minutos: %d", minutesNow);
             
             if (nvs_app_get(TAG_AGEN_HORARIO, horario, 's')){
-                // ESP_LOGW(TAG, "%s", horario);
+                ESP_LOGW(TAG, "%s", horario);
                 minutesScheduling = atoi(&horario[3]);
                 horario[2] = '\0';
                 minutesScheduling += atoi(horario)*60;
-                // ESP_LOGI(TAG, "Tempo em minutos agendado: %d", minutesScheduling);
+                ESP_LOGI(TAG, "Tempo em minutos agendado: %d", minutesScheduling);
             } else {
                 ESP_LOGI(TAG, "Sem horário salvo");
             }
@@ -260,7 +275,7 @@ void wifi_app_connected(void)
     xTaskCreate(vTaskSntp, "SNTP", 2048, NULL, 1, &xHandleSntp);
     xTaskCreate(vTaskSensor, "Cont Sensor", 2048, NULL, 1, &xHandleSensor);
     vTaskSuspend(xHandleSensor);
-    xTaskCreate(vTaskBomba, "Bomba", 1024, NULL, 1, &xHandleBomba);
+    xTaskCreate(vTaskBomba, "Bomba", 2048, NULL, 1, &xHandleBomba);
     vTaskSuspend(xHandleBomba);
     //habilitar interrupção
     xHandleSemphSensor = xSemaphoreCreateCounting(5, 0);
