@@ -7,6 +7,7 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "freertos/timers.h"
+#include "freertos/semphr.h"
 
 /*includes do ESP32*/
 #include "driver/gpio.h"
@@ -42,14 +43,17 @@
 #define TAG_AGEN_VASOS   "v" //Tag da chave para os estados dos 8 solenoides
 #define TAG_AGEN_HORARIO "h" //Tag do agendamento de horário (h:m)
 #define TAG_AGEN_TEMPO   "t" //Tag do tempo de água aberto em minutos
-#define TEMPO_VERIF      5   //Tempo de vefiricação do horario
+#define TEMPO_VERIF      5   //Tempo de vefiricação do horario em minutos
 
 static const char *TAG = "IRRIGACAO";
 static bool credencial_wifi = false;
 static char *ssid;
 static char *pass;
+static int vazao;
+static bool status_bomba;
 
-TaskHandle_t xHandleSntp;
+TaskHandle_t xHandleSntp, xHandleSensor, xHandleBomba;
+SemaphoreHandle_t xHandleSemphSensor;
 
 char* extractJson(char *json, char *name)
 {
@@ -90,6 +94,14 @@ void mqtt_app_event_connected(void)
 void set_solenoides(char *tag, char *dado)
 {
     if ((!strcmp(tag, TAG_AGEN_VASOS)) || (!strcmp(tag, TAG_VASOS))){
+        if(!strcmp(dado, "00000000")){
+            vTaskSuspend(xHandleSensor);
+            vTaskSuspend(xHandleBomba);
+        } else {
+            vTaskResume(xHandleSensor);
+            vTaskResume(xHandleBomba);
+            vazao = 0;
+        }
         gpio_set_level(VASO1, dado[0] == '1');
         gpio_set_level(VASO2, dado[1] == '1');
         gpio_set_level(VASO3, dado[2] == '1');
@@ -101,7 +113,8 @@ void set_solenoides(char *tag, char *dado)
         return;
     }     
     if(!strcmp(tag, TAG_BOMBA)){
-        gpio_set_level(BOMBA, *dado == '1');
+        status_bomba = (*dado == '1');
+        gpio_set_level(BOMBA, status_bomba);
         return;
     }
 }
@@ -139,7 +152,38 @@ void mqtt_app_event_data(char *publish_string, int tam)
     if (dado != NULL){
         nvs_app_set(TAG_AGEN_TEMPO, dado, 's');
     }
+}
 
+static void IRAM_ATTR sensor_isr_handler(void* arg)
+{
+    xSemaphoreGiveFromISR(xHandleSemphSensor, pdFALSE);
+}
+
+void vTaskSensor(void *pvParameters)
+{
+    while (1){
+        xSemaphoreTake( xHandleSemphSensor, portMAX_DELAY );
+        vazao++;
+        ESP_LOGW(TAG, "Botão Apertado, vazão:%d", vazao);
+    }    
+}
+
+void vTaskBomba(void *pvParameters)
+{
+    int cont;
+    while(1){
+        cont = 0;
+        for(int i = 0; i<10; i++){
+            vazao = 0;
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            if(!vazao) cont++;
+        }
+        if ((cont > 7) && (!status_bomba)){
+            set_solenoides(TAG_BOMBA, "1");
+        } else if ((cont > 7) && (status_bomba)){
+            ESP_LOGW(TAG, "Desliga tudo");
+        }
+    }
 }
 
 void acionamento_agendado(void){
@@ -185,7 +229,7 @@ void vTaskSntp (void *pvParameters){
             // ESP_LOGI(TAG, "Tempo em minutos: %d", minutesNow);
             
             if (nvs_app_get(TAG_AGEN_HORARIO, horario, 's')){
-                ESP_LOGW(TAG, "%s", horario);
+                // ESP_LOGW(TAG, "%s", horario);
                 minutesScheduling = atoi(&horario[3]);
                 horario[2] = '\0';
                 minutesScheduling += atoi(horario)*60;
@@ -214,6 +258,14 @@ void wifi_app_connected(void)
 {
     mqtt_app_start();
     xTaskCreate(vTaskSntp, "SNTP", 2048, NULL, 1, &xHandleSntp);
+    xTaskCreate(vTaskSensor, "Cont Sensor", 2048, NULL, 1, &xHandleSensor);
+    vTaskSuspend(xHandleSensor);
+    xTaskCreate(vTaskBomba, "Bomba", 1024, NULL, 1, &xHandleBomba);
+    vTaskSuspend(xHandleBomba);
+    //habilitar interrupção
+    xHandleSemphSensor = xSemaphoreCreateCounting(5, 0);
+    gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1);
+    gpio_isr_handler_add(SENSOR, sensor_isr_handler, NULL);
 }
 
 void http_server_receive_post(int tam, char *data)
@@ -239,14 +291,15 @@ static void initialise_gpio(void)
     gpio_config_t io_conf = {0};
     
     //GPIO INPUT
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.pin_bit_mask = BIT64(BUTTON);
+    io_conf.pin_bit_mask = BIT64(SENSOR);
+    io_conf.intr_type = GPIO_INTR_NEGEDGE;
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = 1;
     io_conf.pull_down_en = 0;
     gpio_config(&io_conf);
 
-    io_conf.pin_bit_mask = BIT64(SENSOR);
+    io_conf.pin_bit_mask = BIT64(BUTTON);
+    io_conf.intr_type = GPIO_INTR_DISABLE;
     gpio_config(&io_conf);
 
     //GPIO OUTPUT
