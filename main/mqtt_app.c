@@ -98,5 +98,5 @@ void mqtt_app_start(void)
 }
 
 // void mqtt_app_event_connected(void){} 
-void mqtt_app_event_disconnected(void){} 
+// void mqtt_app_event_disconnected(void){}
 // void mqtt_app_event_data(char* topic, char *publish_string){}

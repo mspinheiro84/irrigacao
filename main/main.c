@@ -28,22 +28,27 @@
 /*define*/
 #define BUTTON  13 //Pino do botão
 #define SENSOR  21 //Pino do sensor
-#define LED     2  //LED do kit
-#define BOMBA   2 //Pino da bomba 19
+#define LED     4  //LED do kit
+#define BOMBA   32 //Pino da bomba 19
 #define VASO1   27 //Pino da solenoide 1
 #define VASO2   26 //Pino da solenoide 2
 #define VASO3   25 //Pino da solenoide 3
 #define VASO4   33 //Pino da solenoide 4
-#define VASO5   32 //Pino da solenoide 5
-#define VASO6   35 //Pino da solenoide 6
-#define VASO7   34 //Pino da solenoide 7
-#define VASO8   39 //Pino da solenoide 8
-#define TAG_VASOS   "a" //Tag da chave para os estados dos 8 solenoides
-#define TAG_BOMBA   "b" //Tag da chave para o estado da bomba
+#define VASO5   23 //Pino da solenoide 5
+#define VASO6   22 //Pino da solenoide 6
+#define VASO7   19 //Pino da solenoide 7
+#define VASO8   18 //Pino da solenoide 8
+
+#define TAG_VASOS        "a" //Tag da chave para os estados dos 8 solenoides
+#define TAG_BOMBA        "b" //Tag da chave para o estado da bomba
 #define TAG_AGEN_VASOS   "v" //Tag da chave para os estados dos 8 solenoides
 #define TAG_AGEN_HORARIO "h" //Tag do agendamento de horário (h:m)
 #define TAG_AGEN_TEMPO   "t" //Tag do tempo de água aberto em minutos
-#define TEMPO_VERIF      2   //Tempo de vefiricação do horario em minutos
+
+#define TEMPO_VERIF     2   //Tempo de vefiricação do horario em minutos
+#define SEM_CREDENCIAL  0
+#define DESCONECTADO    1
+#define CONECTADO       2
 
 static const char *TAG = "IRRIGACAO";
 static bool credencial_wifi = false;
@@ -52,8 +57,9 @@ static char *pass;
 static int vazao;
 static bool status_registro;
 static bool status_bomba;
+static int status_conexao = DESCONECTADO;
 
-TaskHandle_t xHandleSntp, xHandleSensor, xHandleBomba;
+TaskHandle_t xHandleSntp, xHandleSensor, xHandleBomba, xHandleIndicador;
 SemaphoreHandle_t xHandleSemphSensor;
 
 char* extractJson(char *json, char *name)
@@ -90,6 +96,12 @@ void mqtt_app_event_connected(void)
     char topic[33];
     sprintf(topic, "irrigacao/Aju");
     mqtt_app_subscribe(topic);
+    status_conexao = CONECTADO;
+}
+
+void mqtt_app_event_disconnected(void)
+{
+    // status_conexao = DESCONECTADO;
 }
 
 void set_solenoides(char *tag, char *dado)
@@ -100,10 +112,10 @@ void set_solenoides(char *tag, char *dado)
         gpio_set_level(VASO2, dado[1] == '1');
         gpio_set_level(VASO3, dado[2] == '1');
         gpio_set_level(VASO4, dado[3] == '1');
-        // gpio_set_level(VASO5, dado[4] == '1');
-        // gpio_set_level(VASO6, dado[5] == '1');
-        // gpio_set_level(VASO7, dado[6] == '1');
-        // gpio_set_level(VASO8, dado[7] == '1');
+        gpio_set_level(VASO5, dado[4] == '1');
+        gpio_set_level(VASO6, dado[5] == '1');
+        gpio_set_level(VASO7, dado[6] == '1');
+        gpio_set_level(VASO8, dado[7] == '1');
         if(!strcmp(dado, "00000000")){
             status_registro = pdFALSE;
             vTaskSuspend(xHandleSensor);
@@ -126,7 +138,7 @@ void set_solenoides(char *tag, char *dado)
 
 void mqtt_app_event_data(char *publish_string, int tam)
 {
-    ESP_LOGW(TAG, "payload: %.*s", tam, publish_string);
+    // ESP_LOGW(TAG, "payload: %.*s", tam, publish_string);
     publish_string[tam] = '\0';
     char aux[tam+1];
     strcpy(aux, publish_string);
@@ -172,6 +184,28 @@ static void IRAM_ATTR sensor_isr_handler(void* arg)
 {
     xSemaphoreGiveFromISR(xHandleSemphSensor, pdFALSE);
 }
+
+void vTaskIndicador(void *pvParameters)
+{
+    while (1)
+    {     
+        switch (status_conexao){
+        case SEM_CREDENCIAL:
+            gpio_set_level(LED, !gpio_get_level(LED));
+            vTaskDelay(pdMS_TO_TICKS(330));
+            break;
+        case DESCONECTADO:
+            gpio_set_level(LED, !gpio_get_level(LED));
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            break;
+        case CONECTADO:
+            gpio_set_level(LED, pdTRUE);
+            vTaskDelay(pdMS_TO_TICKS(10000));
+            break;
+        }
+    }
+}
+
 
 void vTaskSensor(void *pvParameters)
 {
@@ -319,7 +353,7 @@ static void initialise_gpio(void)
 
     //GPIO OUTPUT
     io_conf.pin_bit_mask = BIT64(LED);
-    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.mode = GPIO_MODE_INPUT_OUTPUT;
     io_conf.pull_up_en = 0;
     gpio_config(&io_conf);
 
@@ -378,6 +412,9 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     initialise_gpio();
+
+    xTaskCreate(vTaskIndicador, "Indicador", 2048, NULL, 1, &xHandleIndicador);
+
     if (check_button()) {
        clear_credencial_wifi(); 
     }
@@ -385,6 +422,7 @@ void app_main(void)
     ssid = malloc(50*sizeof(char));
     pass = malloc(20*sizeof(char));
     if (!nvs_app_get("ssid", ssid, 's') || !nvs_app_get("pass", pass, 's')){
+        status_conexao = SEM_CREDENCIAL;
         wifi_init_softap();
         start_http_server();
 
@@ -399,5 +437,6 @@ void app_main(void)
         
         }
     }
+    status_conexao = DESCONECTADO;
     wifi_init_sta(ssid, pass);
 }
