@@ -112,7 +112,7 @@ void set_solenoides(char *tag, char *dado)
     char payload[20];
     if ((!strcmp(tag, TAG_AGEN_VASOS)) || (!strcmp(tag, TAG_VASOS))){
         vazao = 0;
-        sprintf(payload, "{\"%s\":\"%s\"}", TAG_VASOS_STATUS, dado);
+        sprintf(payload, "{\"%s\":\"%.*s\"}", TAG_VASOS_STATUS, 8, dado);
         mqtt_app_publish(MQTT_TOPIC, payload);
         gpio_set_level(VASO1, dado[0] == '1');
         gpio_set_level(VASO2, dado[1] == '1');
@@ -135,7 +135,7 @@ void set_solenoides(char *tag, char *dado)
     }     
     if(!strcmp(tag, TAG_BOMBA)){
         if (status_registro){
-            sprintf(payload, "{\"%s\":\"%s\"}", TAG_BOMBA_STATUS, dado);
+            sprintf(payload, "{\"%s\":\"%.*s\"}", TAG_BOMBA_STATUS, 1, dado);
             mqtt_app_publish(MQTT_TOPIC, payload);
             status_bomba = (*dado == '1');
             gpio_set_level(BOMBA, status_bomba);
@@ -220,7 +220,7 @@ void vTaskSensor(void *pvParameters)
     while (1){
         xSemaphoreTake( xHandleSemphSensor, portMAX_DELAY );
         vazao++;
-        ESP_LOGW(TAG, "vazão:%d", vazao);
+        // ESP_LOGW(TAG, "vazão:%d", vazao);
     }    
 }
 
@@ -253,7 +253,11 @@ void acionamento_agendado(void){
     dado = malloc(3*sizeof(char));
     nvs_app_get(TAG_AGEN_TEMPO, dado, 's');
     // ESP_LOGW(TAG, "Liga agua");
-    vTaskDelay(pdMS_TO_TICKS(1000*60*atoi(dado)));
+    for (int i=0; i<atoi(dado) && status_registro; i++)
+    {
+        vTaskDelay(pdMS_TO_TICKS(1000*60));
+    }
+    
     fechaAgua();
 }
 
@@ -285,14 +289,14 @@ void vTaskSntp (void *pvParameters){
             minutesNow += atoi(aux);
             minutesScheduling = -1;
 
-            ESP_LOGI(TAG, "Tempo em minutos: %d", minutesNow);
+            // ESP_LOGI(TAG, "Tempo em minutos: %d", minutesNow);
             
             if (nvs_app_get(TAG_AGEN_HORARIO, horario, 's')){
-                ESP_LOGW(TAG, "%s", horario);
+                ESP_LOGI(TAG, "%s", horario);
                 minutesScheduling = atoi(&horario[3]);
                 horario[2] = '\0';
                 minutesScheduling += atoi(horario)*60;
-                ESP_LOGI(TAG, "Tempo em minutos agendado: %d", minutesScheduling);
+                // ESP_LOGI(TAG, "Tempo em minutos agendado: %d", minutesScheduling);
             } else {
                 ESP_LOGI(TAG, "Sem horário salvo");
             }
