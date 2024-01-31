@@ -39,11 +39,14 @@
 #define VASO7   19 //Pino da solenoide 7
 #define VASO8   18 //Pino da solenoide 8
 
+#define MQTT_TOPIC       "irrigacao/Aju" // Topico do mqtt
 #define TAG_VASOS        "a" //Tag da chave para os estados dos 8 solenoides
 #define TAG_BOMBA        "b" //Tag da chave para o estado da bomba
 #define TAG_AGEN_VASOS   "v" //Tag da chave para os estados dos 8 solenoides
 #define TAG_AGEN_HORARIO "h" //Tag do agendamento de horário (h:m)
 #define TAG_AGEN_TEMPO   "t" //Tag do tempo de água aberto em minutos
+#define TAG_VASOS_STATUS "s" //Tag para de status dos vasos
+#define TAG_BOMBA_STATUS "o" //Tag para de status da bomba
 
 #define TEMPO_VERIF     2   //Tempo de vefiricação do horario em minutos
 #define SEM_CREDENCIAL  0
@@ -93,9 +96,9 @@ char* extractJson(char *json, char *name)
 
 void mqtt_app_event_connected(void)
 {
-    char topic[33];
-    sprintf(topic, "irrigacao/Aju");
-    mqtt_app_subscribe(topic);
+    // char topic[33];
+    // sprintf(topic, "irrigacao/Aju");
+    mqtt_app_subscribe(MQTT_TOPIC);
     status_conexao = CONECTADO;
 }
 
@@ -106,8 +109,11 @@ void mqtt_app_event_disconnected(void)
 
 void set_solenoides(char *tag, char *dado)
 {
+    char payload[20];
     if ((!strcmp(tag, TAG_AGEN_VASOS)) || (!strcmp(tag, TAG_VASOS))){
         vazao = 0;
+        sprintf(payload, "{\"%s\":\"%s\"}", TAG_VASOS_STATUS, dado);
+        mqtt_app_publish(MQTT_TOPIC, payload);
         gpio_set_level(VASO1, dado[0] == '1');
         gpio_set_level(VASO2, dado[1] == '1');
         gpio_set_level(VASO3, dado[2] == '1');
@@ -129,6 +135,8 @@ void set_solenoides(char *tag, char *dado)
     }     
     if(!strcmp(tag, TAG_BOMBA)){
         if (status_registro){
+            sprintf(payload, "{\"%s\":\"%s\"}", TAG_BOMBA_STATUS, dado);
+            mqtt_app_publish(MQTT_TOPIC, payload);
             status_bomba = (*dado == '1');
             gpio_set_level(BOMBA, status_bomba);
         }
@@ -229,6 +237,7 @@ void vTaskBomba(void *pvParameters)
         if ((cont > 7) && (!status_bomba)){
             set_solenoides(TAG_BOMBA, "1");
         } else if ((cont > 7) && (status_bomba)){
+            mqtt_app_publish(MQTT_TOPIC, "Parar irrigação por estar sem agua");
             ESP_LOGW(TAG, "Medida de proteção");
             fechaAgua();
         }
@@ -239,6 +248,7 @@ void acionamento_agendado(void){
     char *dado;
     dado = malloc(9*sizeof(char));
     nvs_app_get(TAG_AGEN_VASOS, dado, 's');
+    // mqtt_app_publish("{"a":\"%s\"}", dado);
     set_solenoides(TAG_AGEN_VASOS, dado);
     dado = malloc(3*sizeof(char));
     nvs_app_get(TAG_AGEN_TEMPO, dado, 's');
